@@ -6,8 +6,19 @@ from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. Page Configuration ---
-st.set_page_config(page_title="Market Analyzer V19: Global Command", layout="wide")
-st.markdown("""<style> .main { background-color: #0e1117; } .stMetric { background-color: #161b22; border-radius: 10px; padding: 15px; border: 1px solid #30363d; } </style>""", unsafe_allow_html=True)
+st.set_page_config(page_title="Market Analyzer V21: Global Command", layout="wide")
+
+# CSS Fix for 6 columns: Shrinks font slightly so metrics don't disappear
+st.markdown("""
+<style> 
+    .main { background-color: #0e1117; } 
+    .stMetric { background-color: #161b22; border-radius: 10px; padding: 10px; border: 1px solid #30363d; }
+    [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
+    .vsa-box { padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #30363d; background-color: #1c2128; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("⚡ Market Analyzer Pro: Global Command Center")
 
 # --- 2. Sidebar Controls ---
@@ -69,12 +80,11 @@ def fetch_global_cues():
                 if name == "Gold MCX" and c < 20000: c *= 10  
                 if name == "Silver MCX" and c < 10000: c *= 1000 
                 results[name] = {"price": c, "change": ((c - p) / p) * 100 if p != 0 else 0}
-            else:
-                results[name] = {"price": 0.0, "change": 0.0}
+            else: results[name] = {"price": 0.0, "change": 0.0}
         except: results[name] = {"price": 0.0, "change": 0.0}
     return results
 
-# --- 5. Stock Data Engine (Fixed for MultiIndex) ---
+# --- 5. Stock Data Engine ---
 @st.cache_data(ttl=15)
 def load_stock_data(ticker, period, interval):
     df = yf.download(ticker, period=period, interval=interval, progress=False)
@@ -129,8 +139,35 @@ with tab2:
         df['VWAP'] = df.groupby('Date_Only', group_keys=False).apply(lambda x: (x['Typical'] * x['Volume']).cumsum() / x['Volume'].cumsum())
         df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
         df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+        
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
 
-        # Pivot Targets
+        # VSA LOGIC
+        df['Vol_Avg'] = df['Volume'].rolling(window=10).mean()
+        last_vol, avg_vol = df['Volume'].iloc[-1], df['Vol_Avg'].iloc[-1]
+        price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2]
+        
+        if price_change > 0 and last_vol > avg_vol:
+            v_title, v_action, v_color = "ACCUMULATION", "Price UP + Volume UP", "#00FF00"
+            v_meaning = "Smart money is buying aggressively. High conviction move."
+        elif price_change > 0 and last_vol < avg_vol:
+            v_title, v_action, v_color = "WEAK RALLY (Bull Trap)", "Price UP + Volume DOWN", "#FFDC00"
+            v_meaning = "Price is rising on low volume. Big players are NOT buying. Move might fail."
+        elif price_change < 0 and last_vol > avg_vol:
+            v_title, v_action, v_color = "DISTRIBUTION", "Price DOWN + Volume UP", "#FF4136"
+            v_meaning = "Institutions are dumping shares. A downward trend may be starting."
+        elif price_change < 0 and last_vol < avg_vol:
+            v_title, v_action, v_color = "WEAK SELL-OFF (Shake-out)", "Price DOWN + Volume DOWN", "#FF851B"
+            v_meaning = "Price dropping on low volume. Likely a temporary dip to scare retail."
+        else:
+            v_title, v_action, v_color = "NEUTRAL", "Stable Price/Volume", "#FFFFFF"
+            v_meaning = "No clear trend. Market is undecided."
+
+        # Pivot Targets FIX
         yest = daily_df.iloc[-2]
         y_H, y_L, y_C = float(yest['High']), float(yest['Low']), float(yest['Close'])
         P = (y_H + y_L + y_C) / 3
@@ -144,41 +181,36 @@ with tab2:
         if apply_duty: levels = [lvl * (1 + (duty_percentage / 100)) for lvl in levels]
         S5, S4, S3, S2, S1, P, R1, R2, R3, R4, R5 = levels
 
-        cur, vwap = float(df['Close'].iloc[-1]), float(df['VWAP'].iloc[-1])
-        is_bullish = cur > vwap and df['EMA9'].iloc[-1] > df['EMA21'].iloc[-1]
-        is_bearish = cur < vwap and df['EMA9'].iloc[-1] < df['EMA21'].iloc[-1]
+        cur, vwap, rsi_val = float(df['Close'].iloc[-1]), float(df['VWAP'].iloc[-1]), df['RSI'].iloc[-1]
 
-        # Dashboard
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Current Price", f"{currency}{cur:.2f}")
-        c2.metric("VWAP (Fair Value)", f"{currency}{vwap:.2f}")
-        c3.metric("9 EMA", f"{currency}{df['EMA9'].iloc[-1]:.2f}")
-        c4.metric("21 EMA", f"{currency}{df['EMA21'].iloc[-1]:.2f}")
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Price", f"{currency}{cur:.2f}")
+        m2.metric("VWAP", f"{currency}{vwap:.2f}")
+        m3.metric("9 EMA", f"{currency}{df['EMA9'].iloc[-1]:.2f}")
+        m4.metric("21 EMA", f"{currency}{df['EMA21'].iloc[-1]:.2f}")
+        m5.metric("RSI (14)", f"{rsi_val:.2f}")
+        m6.metric("Vol Ratio", f"{(last_vol/avg_vol):.2f}x")
 
+        st.markdown(f"""<div class="vsa-box" style="border-left: 10px solid {v_color};">
+                <h3 style="color: {v_color}; margin-top:0;">🔍 Phase: {v_title}</h3>
+                <p style="font-size: 15px; margin-bottom: 5px;"><b>Technicals:</b> {v_action}</p>
+                <p style="font-size: 16px;"><b>Meaning:</b> {v_meaning}</p>
+            </div>""", unsafe_allow_html=True)
+        
         st.markdown("---")
         left, right = st.columns([1.6, 1])
         with left:
             st.subheader("📖 Execution Strategy")
-            if is_bullish:
-                st.success("### Trend: UP. Buy Dips.")
-                st.write(f"1. **Buy Half:** {currency}{cur:.2f} or EMA 9.")
-                st.write(f"2. **Average Down Safely:** Only buy second half at Support **{currency}{S1:.2f}**.")
-                st.write(f"3. **Take Profit:** Exit at **{currency}{R1:.2f}**.")
-            elif is_bearish:
-                st.error("### Trend: DOWN. Short Rallies.")
-                st.write(f"1. **Short Half:** {currency}{cur:.2f}.")
-                st.write(f"2. **Average Up Safely:** Short the second half at Resistance **{currency}{R1:.2f}**.")
-                st.write(f"3. **Take Profit:** Cover at Support **{currency}{S1:.2f}**.")
+            if cur > vwap:
+                st.success(f"**Trend: UP.** Buy Half near {currency}{cur:.2f}. Support {currency}{S1:.2f}. Target {currency}{R1:.2f}")
             else:
-                st.warning("### Trend: SIDEWAYS. Play Range.")
-                st.write(f"Buy at S1 {currency}{S1:.2f}, Short at R1 {currency}{R1:.2f}. Exit at VWAP.")
+                st.error(f"**Trend: DOWN.** Short Half near {currency}{cur:.2f}. Resistance {currency}{R1:.2f}. Target {currency}{S1:.2f}")
             
             st.markdown("---")
             st.subheader("🎲 Options Hedge")
             sb = 50 if cur > 1000 else 10
             atm = int(sb * round(cur/sb))
-            if is_bullish: st.info(f"**Bull Call Spread:** Buy {atm} CE | Sell {atm+sb} CE")
-            elif is_bearish: st.info(f"**Bear Put Spread:** Buy {atm} PE | Sell {atm-sb} PE")
+            st.info(f"**{'Bull' if cur > vwap else 'Bear'} Spread:** {atm} {'CE' if cur > vwap else 'PE'}")
 
             st.markdown("---")
             st.subheader("📰 Latest News")
@@ -192,11 +224,10 @@ with tab2:
                 st.markdown(f"<p style='color:{clr}; font-size:18px;'><b>{k}:</b> {currency}{v:.2f}</p>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.subheader(f"Live Chart Verification ({interval})")
         chart_df = df.tail(150)
         fig = go.Figure(data=[go.Candlestick(x=chart_df['Date'], open=chart_df['Open'], high=chart_df['High'], low=chart_df['Low'], close=chart_df['Close'], name='Price')])
         fig.add_trace(go.Scatter(x=chart_df['Date'], y=chart_df['VWAP'], line=dict(color='purple', width=2), name='VWAP'))
-        fig.add_hline(y=R1, line_dash="dash", line_color="green", annotation_text="Target R1")
-        fig.add_hline(y=S1, line_dash="dash", line_color="red", annotation_text="Support S1")
+        fig.add_trace(go.Scatter(x=chart_df['Date'], y=chart_df['EMA9'], line=dict(color='#00FFFF', width=1), name='9 EMA'))
+        fig.add_trace(go.Scatter(x=chart_df['Date'], y=chart_df['EMA21'], line=dict(color='#FF851B', width=1), name='21 EMA'))
         fig.update_layout(xaxis_rangeslider_visible=False, height=550, template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0))
         st.plotly_chart(fig, use_container_width=True)
