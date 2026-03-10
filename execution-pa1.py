@@ -146,7 +146,7 @@ with tab2:
         rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
 
-        # VSA LOGIC
+        # VSA Logic
         df['Vol_Avg'] = df['Volume'].rolling(window=10).mean()
         last_vol, avg_vol = df['Volume'].iloc[-1], df['Vol_Avg'].iloc[-1]
         price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2]
@@ -167,7 +167,7 @@ with tab2:
             v_title, v_action, v_color = "NEUTRAL", "Stable Price/Volume", "#FFFFFF"
             v_meaning = "No clear trend. Market is undecided."
 
-        # Pivot Targets FIX
+        # Pivot Targets Logic
         yest = daily_df.iloc[-2]
         y_H, y_L, y_C = float(yest['High']), float(yest['Low']), float(yest['Close'])
         P = (y_H + y_L + y_C) / 3
@@ -183,6 +183,7 @@ with tab2:
 
         cur, vwap, rsi_val = float(df['Close'].iloc[-1]), float(df['VWAP'].iloc[-1]), df['RSI'].iloc[-1]
 
+        # Metrics Row
         m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Price", f"{currency}{cur:.2f}")
         m2.metric("VWAP", f"{currency}{vwap:.2f}")
@@ -191,6 +192,7 @@ with tab2:
         m5.metric("RSI (14)", f"{rsi_val:.2f}")
         m6.metric("Vol Ratio", f"{(last_vol/avg_vol):.2f}x")
 
+        # VSA Translator Box
         st.markdown(f"""<div class="vsa-box" style="border-left: 10px solid {v_color};">
                 <h3 style="color: {v_color}; margin-top:0;">🔍 Phase: {v_title}</h3>
                 <p style="font-size: 15px; margin-bottom: 5px;"><b>Technicals:</b> {v_action}</p>
@@ -202,9 +204,17 @@ with tab2:
         with left:
             st.subheader("📖 Execution Strategy")
             if cur > vwap:
-                st.success(f"**Trend: UP.** Buy Half near {currency}{cur:.2f}. Support {currency}{S1:.2f}. Target {currency}{R1:.2f}")
+                # SYNCED TARGETS: Target is now the NEXT resistance level
+                target_level = R1 if cur < R1 else (R2 if cur < R2 else R3)
+                st.success(f"**Trend: UP.** Buy Half near {currency}{cur:.2f} or EMA 9.")
+                st.write(f"1. **Average Down:** At Support **{currency}{S1:.2f}**.")
+                st.write(f"2. **Target:** Exit at Resistance **{currency}{target_level:.2f}**.")
             else:
-                st.error(f"**Trend: DOWN.** Short Half near {currency}{cur:.2f}. Resistance {currency}{R1:.2f}. Target {currency}{S1:.2f}")
+                # SYNCED TARGETS: Target is now the NEXT support level
+                target_level = S1 if cur > S1 else (S2 if cur > S2 else S3)
+                st.error(f"**Trend: DOWN.** Short Half near {currency}{cur:.2f}.")
+                st.write(f"1. **Average Up:** At Resistance **{currency}{R1:.2f}**.")
+                st.write(f"2. **Target:** Cover at Support **{currency}{target_level:.2f}**.")
             
             st.markdown("---")
             st.subheader("🎲 Options Hedge")
