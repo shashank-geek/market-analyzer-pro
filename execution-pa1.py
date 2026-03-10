@@ -51,25 +51,15 @@ else:
     ticker_input = raw_ticker
     currency = "$"
 
-# --- 4. Global Macro Data Fetcher (Corrected Tickers) ---
+# --- 4. Global Macro Data Fetcher ---
 @st.cache_data(ttl=60)
 def fetch_global_cues():
     indices = {
-        "Nifty 50": "^NSEI",
-        "Sensex": "^BSESN",
-        "India Vix": "^INDIAVIX",
-        "Gift Nifty": "NIFTY1!", 
-        "Dow Jones": "^DJI",
-        "S&P 500": "^GSPC",
-        "Nasdaq": "^IXIC",
-        "Gold MCX": "GOLD1!.NS",   
-        "Silver MCX": "SILVER1!.NS", 
-        "Gold COMEX": "GC=F",
-        "Silver COMEX": "SI=F",
-        "Brent Crude": "BZ=F",
-        "Nymex Crude": "CL=F",
-        "USD-INR": "INR=X",
-        "Dollar Index": "DX-Y.NYB"
+        "Nifty 50": "^NSEI", "Sensex": "^BSESN", "India Vix": "^INDIAVIX",
+        "Gift Nifty": "NIFTY1!", "Dow Jones": "^DJI", "S&P 500": "^GSPC",
+        "Nasdaq": "^IXIC", "Gold MCX": "GOLD1!.NS", "Silver MCX": "SILVER1!.NS", 
+        "Gold COMEX": "GC=F", "Silver COMEX": "SI=F", "Brent Crude": "BZ=F",
+        "Nymex Crude": "CL=F", "USD-INR": "INR=X", "Dollar Index": "DX-Y.NYB"
     }
     results = {}
     for name, sym in indices.items():
@@ -167,6 +157,20 @@ with tab2:
             v_title, v_action, v_color = "NEUTRAL", "Stable Price/Volume", "#FFFFFF"
             v_meaning = "No clear trend. Market is undecided."
 
+        # Expert Confluence Insight
+        ema_signal = "Bullish" if df['EMA9'].iloc[-1] > df['EMA21'].iloc[-1] else "Bearish"
+        rsi_val = df['RSI'].iloc[-1]
+        if ema_signal == "Bullish" and v_title == "ACCUMULATION" and rsi_val < 65:
+            expert_guess = "🚀 **Strong Confluence:** Price is likely to SURGE higher. EMA and Volume are in perfect alignment."
+        elif ema_signal == "Bearish" and v_title == "DISTRIBUTION" and rsi_val > 35:
+            expert_guess = "⚠️ **High Risk:** Price is likely to CRASH. Institutional dumping and trend weakness confirmed."
+        elif rsi_val > 70 and v_title == "WEAK RALLY (Bull Trap)":
+            expert_guess = "🛑 **Exhaustion Alert:** Price is likely to REVERSE. RSI is overbought and volume is low."
+        elif ema_signal == "Bullish" and v_title == "WEAK SELL-OFF (Shake-out)":
+            expert_guess = "📉 **Buying Opportunity:** This dip is a likely fake-out. Primary trend remains UP; expect a bounce."
+        else:
+            expert_guess = "⚖️ **Mixed Signals:** Indicators are in a tug-of-war. Wait for a breakout for confirmation."
+
         # Pivot Targets Logic
         yest = daily_df.iloc[-2]
         y_H, y_L, y_C = float(yest['High']), float(yest['Low']), float(yest['Close'])
@@ -181,7 +185,7 @@ with tab2:
         if apply_duty: levels = [lvl * (1 + (duty_percentage / 100)) for lvl in levels]
         S5, S4, S3, S2, S1, P, R1, R2, R3, R4, R5 = levels
 
-        cur, vwap, rsi_val = float(df['Close'].iloc[-1]), float(df['VWAP'].iloc[-1]), df['RSI'].iloc[-1]
+        cur, vwap = float(df['Close'].iloc[-1]), float(df['VWAP'].iloc[-1])
 
         # Metrics Row
         m1, m2, m3, m4, m5, m6 = st.columns(6)
@@ -199,18 +203,19 @@ with tab2:
                 <p style="font-size: 16px;"><b>Meaning:</b> {v_meaning}</p>
             </div>""", unsafe_allow_html=True)
         
+        # New Expert Insight Line
+        st.info(f"🧠 **Expert Analysis:** {expert_guess}")
         st.markdown("---")
+
         left, right = st.columns([1.6, 1])
         with left:
             st.subheader("📖 Execution Strategy")
             if cur > vwap:
-                # SYNCED TARGETS: Target is now the NEXT resistance level
                 target_level = R1 if cur < R1 else (R2 if cur < R2 else R3)
                 st.success(f"**Trend: UP.** Buy Half near {currency}{cur:.2f} or EMA 9.")
                 st.write(f"1. **Average Down:** At Support **{currency}{S1:.2f}**.")
                 st.write(f"2. **Target:** Exit at Resistance **{currency}{target_level:.2f}**.")
             else:
-                # SYNCED TARGETS: Target is now the NEXT support level
                 target_level = S1 if cur > S1 else (S2 if cur > S2 else S3)
                 st.error(f"**Trend: DOWN.** Short Half near {currency}{cur:.2f}.")
                 st.write(f"1. **Average Up:** At Resistance **{currency}{R1:.2f}**.")
@@ -234,6 +239,7 @@ with tab2:
                 st.markdown(f"<p style='color:{clr}; font-size:18px;'><b>{k}:</b> {currency}{v:.2f}</p>", unsafe_allow_html=True)
 
         st.markdown("---")
+        st.subheader(f"Live Chart Verification ({interval})")
         chart_df = df.tail(150)
         fig = go.Figure(data=[go.Candlestick(x=chart_df['Date'], open=chart_df['Open'], high=chart_df['High'], low=chart_df['Low'], close=chart_df['Close'], name='Price')])
         fig.add_trace(go.Scatter(x=chart_df['Date'], y=chart_df['VWAP'], line=dict(color='purple', width=2), name='VWAP'))
